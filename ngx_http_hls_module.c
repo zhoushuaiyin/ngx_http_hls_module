@@ -202,32 +202,40 @@ static ngx_int_t ngx_hls_handler(ngx_http_request_t *r)
 		}
 		else{
 			ngx_str_t type = ngx_string("video/mp2t");	//ts文件的content type
-			ngx_str_t response = ngx_string("nothing to do");
+			ngx_snprintf(filename,1024,"%s%V.ts",media_path,&media_file);
+
+			r->allow_ranges = 1; //开启range选项
+			char *start = ngx_http_hls_convert_string(media_start);
+			char *end = ngx_http_hls_convert_string(media_end);
+			ngx_chain_t *out = ngx_pcalloc(r->pool,sizeof(ngx_chain_t));
+			ngx_buf_t *b = ngx_pcalloc(r->pool,sizeof(ngx_buf_t));
+			if(b == NULL){
+				return NGX_HTTP_INTERNAL_SERVER_ERROR;
+			}
+			b->in_file = 1;
+			b->file = ngx_pcalloc(r->pool,sizeof(ngx_file_t));
+			b->file->fd = ngx_open_file(filename,NGX_FILE_RDONLY|NGX_FILE_NONBLOCK, NGX_FILE_OPEN,0);
+			if(b->file->fd == -1){
+				return NGX_HTTP_INTERNAL_SERVER_ERROR;
+			}
+			b->file->name.data = filename;
+			b->file->name.len = sizeof(filename)-1;
+		
 			r->headers_out.status = NGX_HTTP_OK;
-			r->headers_out.content_length_n = response.len;
+			r->headers_out.content_length_n = atol(start)-atol(end);
 			r->headers_out.content_type = type;
+			b->file_pos = atol(start);
+			b->file_last= atol(end);
+			b->last_in_chain = 1;
+			b->file->log = r->connection->log;
+			b->last_buf = 1;
 			rc = ngx_http_send_header(r);
+			out->buf = b;
+			out->next = NULL;
 			if(rc == NGX_ERROR || rc > NGX_OK || r->header_only)
 			{
 				return rc;
 			}
-			ngx_chain_t *out;
-   			out = ngx_pcalloc(r->pool,sizeof(ngx_chain_t));
-    		ngx_buf_t *b;
-    		//b = ngx_create_temp_buf(r->pool,response.len);
-    		b = ngx_pcalloc(r->pool,sizeof(ngx_buf_t));
-    		if(b == NULL)
-    		{
-        		return NGX_HTTP_INTERNAL_SERVER_ERROR;
-    		}
-    		//ngx_memcpy(b->pos, response.data,response.len);
-    		b->pos = response.data;
-    		b->last = b->pos + response.len;
-    		b->last_buf = 1;
-    		b->memory =1 ;
-    		//ngx_chain_t out;
-    		out->buf=b;
-    		out->next=NULL;
 			return ngx_http_output_filter(r,out);
 			
 		}	
