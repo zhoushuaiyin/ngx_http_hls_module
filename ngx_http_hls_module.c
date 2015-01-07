@@ -7,7 +7,7 @@ typedef struct{
 	ngx_str_t media_path;
 } ngx_http_hls_loc_conf_t;
 
-static u_char filename[1024];
+//static u_char filename[1024];
 
 static ngx_int_t ngx_hls_handler(ngx_http_request_t *r);
 static char* ngx_http_hls(ngx_conf_t *cf,ngx_command_t *cmd,void *conf);
@@ -136,8 +136,10 @@ static ngx_int_t ngx_hls_handler(ngx_http_request_t *r)
 		ngx_http_arg(r, (u_char *)"end", 3 , &media_end);
 
 		if(rc == NGX_DECLINED || media_start.len == 0){
+			char filename[512];
+			bzero(filename,512);
 			ngx_str_t type = ngx_string("application/x-mpegURL");//m3u8文件的content type
-			ngx_snprintf(filename,1024,"%s%V.m3u8",media_path,&media_file);
+			ngx_snprintf((u_char*)filename,1024,"%s%V.m3u8",media_path,&media_file);
 			
 			//M3U8文件不存在，目前采用直接返回错误的方式，后期采用根据TS文件创建新的M3U8
 			if(access((char*)filename,F_OK) == -1){
@@ -160,7 +162,7 @@ static ngx_int_t ngx_hls_handler(ngx_http_request_t *r)
 				if(b->file->fd == -1){
 					return NGX_HTTP_INTERNAL_SERVER_ERROR;
 				}
-				b->file->name.data = filename;
+				b->file->name.data = (u_char*)filename;
 				b->file->name.len = sizeof(filename) -1;
 				if(ngx_file_info(filename,&b->file->info) == NGX_FILE_ERROR){
 					return NGX_HTTP_INTERNAL_SERVER_ERROR;
@@ -196,17 +198,22 @@ static ngx_int_t ngx_hls_handler(ngx_http_request_t *r)
 				{
 					return rc;
 				}
+				
 				return ngx_http_output_filter(r,out);
 			
 			}
 		}
 		else{
 			ngx_str_t type = ngx_string("video/mp2t");	//ts文件的content type
-			ngx_snprintf(filename,1024,"%s%V.ts",media_path,&media_file);
-
+			//ngx_str_t type = ngx_string("application/octet-stream");
+			char filename[512];
+			bzero(filename,512);
+			ngx_snprintf((u_char*)filename,512,"%s%V.ts",media_path,&media_file);
+			ngx_log_error(NGX_LOG_CRIT,r->connection->log,0,"File[%s] is not exist!media_path = %s,media_file=%V",filename,media_path,&media_file);
 			r->allow_ranges = 1; //开启range选项
 			char *start = ngx_http_hls_convert_string(media_start);
 			char *end = ngx_http_hls_convert_string(media_end);
+			ngx_log_error(NGX_LOG_CRIT,r->connection->log,0,"start=%s;end=%s",start,end);
 			ngx_chain_t *out = ngx_pcalloc(r->pool,sizeof(ngx_chain_t));
 			ngx_buf_t *b = ngx_pcalloc(r->pool,sizeof(ngx_buf_t));
 			if(b == NULL){
@@ -218,24 +225,27 @@ static ngx_int_t ngx_hls_handler(ngx_http_request_t *r)
 			if(b->file->fd == -1){
 				return NGX_HTTP_INTERNAL_SERVER_ERROR;
 			}
-			b->file->name.data = filename;
+			b->file->name.data = (u_char*)filename;
 			b->file->name.len = sizeof(filename)-1;
 		
 			r->headers_out.status = NGX_HTTP_OK;
-			r->headers_out.content_length_n = atol(start)-atol(end);
+			r->headers_out.content_length_n = atol(end)-atol(start);
+			 ngx_log_error(NGX_LOG_CRIT,r->connection->log,0,"%d",r->headers_out.content_length_n);
 			r->headers_out.content_type = type;
 			b->file_pos = atol(start);
 			b->file_last= atol(end);
 			b->last_in_chain = 1;
 			b->file->log = r->connection->log;
 			b->last_buf = 1;
-			rc = ngx_http_send_header(r);
 			out->buf = b;
 			out->next = NULL;
+
+			rc = ngx_http_send_header(r);
 			if(rc == NGX_ERROR || rc > NGX_OK || r->header_only)
 			{
 				return rc;
 			}
+			
 			return ngx_http_output_filter(r,out);
 			
 		}	
